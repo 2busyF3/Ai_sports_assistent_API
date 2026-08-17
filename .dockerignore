@@ -8,6 +8,7 @@ __pycache__/
 .env
 .pytest_cache/
 .pytest-tmp/
+.pytest-work/
 archive-verify*/
 frontend/node_modules/
 frontend/dist/

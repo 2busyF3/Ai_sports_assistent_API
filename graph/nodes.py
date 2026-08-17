@@ -5,6 +5,7 @@ from analytics.progression import volume_change_percent
 from analytics.volume import exercise_volume, format_sets
 from database.sqlite import SQLiteRepository
 from graph.state import FitnessState
+from llm.coach import CoachAdvice, generate_coach_advice
 from llm.extractor import detect_language, extract_workout
 
 
@@ -25,8 +26,11 @@ def history_node(repository: SQLiteRepository):
             if latest_sleep is not None:
                 workout = workout.model_copy(update={"sleep_hours": latest_sleep})
         previous = {exercise.name: repository.latest_exercise(exercise.name) for exercise in workout.exercises}
+        profile = repository.get_profile()
         repository.save_workout(workout)
-        return {"workout": workout, "previous": previous}
+        return {"workout": workout, "previous": previous,
+                "training_goal": profile.training_goal if profile else "maintenance",
+                "profile_body_weight_kg": profile.body_weight_kg if profile else None}
     return node
 
 
@@ -67,10 +71,49 @@ def analysis_node(state: FitnessState) -> dict:
     return {"recommendation": recommendation}
 
 
+def coach_node(state: FitnessState) -> dict:
+    """Ask the LLM to interpret verified analytics, not to replace them."""
+    workout = state["workout"]
+    exercises = []
+    for exercise in workout.exercises:
+        previous = state["previous"].get(exercise.name)
+        exercises.append({
+            "name": exercise.name,
+            "current_sets": [{"weight_kg": item.weight_kg, "reps": item.reps} for item in exercise.sets],
+            "current_volume_kg": exercise_volume(exercise),
+            "previous_sets": ([{"weight_kg": item.weight_kg, "reps": item.reps} for item in previous.sets]
+                              if previous else None),
+            "previous_volume_kg": previous.total_volume_kg if previous else None,
+            "volume_change_percent": state["volume_changes"].get(exercise.name),
+        })
+    context = {
+        "training_goal": state.get("training_goal", "maintenance"),
+        "athlete_body_weight_kg": workout.body_weight_kg or state.get("profile_body_weight_kg"),
+        "session": {
+            "sleep_hours": workout.sleep_hours,
+            "duration_minutes": workout.duration_minutes,
+            "average_heart_rate": workout.average_heart_rate,
+            "heart_rate_max": workout.heart_rate_max,
+        },
+        "exercises": exercises,
+        "recovery_flags": state["risks"],
+        "deterministic_baseline": state["recommendation"],
+    }
+    advice = generate_coach_advice(context, state["language"])
+    return {"coach_advice": advice, "coach_used": advice is not None}
+
+
 def response_node(state: FitnessState) -> dict:
     workout = state["workout"]
     russian = state["language"] == "ru"
-    lines: list[str] = []
+    advice = state.get("coach_advice")
+    if isinstance(advice, CoachAdvice):
+        return {"response": _format_coach_advice(advice, russian)}
+
+    lines: list[str] = [
+        "Локальный анализ (LLM недоступна или API-ключ не задан)" if russian
+        else "Local analysis (LLM unavailable or no API key configured)"
+    ]
     for exercise in workout.exercises:
         current_volume = exercise_volume(exercise)
         max_weight = max(item.weight_kg for item in exercise.sets)
@@ -126,3 +169,19 @@ def response_node(state: FitnessState) -> dict:
         recommendation = "не повышайте рабочий вес; повторите тренировку не раньше чем через 72 часа." if russian else "do not increase working weight; repeat this workout no earlier than 72 hours from now."
     lines.append(f"\n{'Итоговая рекомендация' if russian else 'Overall recommendation'}: {recommendation}")
     return {"response": "\n".join(lines)}
+
+
+def _format_coach_advice(advice: CoachAdvice, russian: bool) -> str:
+    if russian:
+        lines = ["AI-анализ тренировки", advice.headline, "", "Оценка", advice.assessment, "", "Следующая тренировка"]
+        lines.extend(f"{item.exercise}: {item.prescription}\nПочему: {item.rationale}" for item in advice.next_session)
+        lines.extend(["", "Восстановление", advice.recovery])
+        if advice.questions:
+            lines.extend(["", "Что уточнить", *[f"• {item}" for item in advice.questions]])
+    else:
+        lines = ["AI workout analysis", advice.headline, "", "Assessment", advice.assessment, "", "Next session"]
+        lines.extend(f"{item.exercise}: {item.prescription}\nWhy: {item.rationale}" for item in advice.next_session)
+        lines.extend(["", "Recovery", advice.recovery])
+        if advice.questions:
+            lines.extend(["", "Useful follow-up", *[f"• {item}" for item in advice.questions]])
+    return "\n".join(lines)

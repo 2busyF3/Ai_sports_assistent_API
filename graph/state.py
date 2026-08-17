@@ -10,4 +10,8 @@ class FitnessState(TypedDict, total=False):
     volume_changes: dict[str, float | None]
     risks: list[str]
     recommendation: str
+    training_goal: str
+    profile_body_weight_kg: float | None
+    coach_advice: object
+    coach_used: bool
     response: str

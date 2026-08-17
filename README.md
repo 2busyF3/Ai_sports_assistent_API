@@ -106,6 +106,12 @@ graph/       # state, nodes, and LangGraph orchestration
 llm/         # OpenAI and local text extraction
 ```
 
+## Developer documentation
+
+See [docs/FUNCTIONS.md](docs/FUNCTIONS.md) for a function-by-function map of
+the analytics, LangGraph nodes, LLM layer, repositories, API, frontend, and
+local entry points.
+
 ## Tests
 
 ```powershell
