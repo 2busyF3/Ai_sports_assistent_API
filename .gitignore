@@ -8,3 +8,6 @@ fitness.db
 *.egg-info/
 
 AI-Fitness-Assistant.zip
+frontend/node_modules/
+frontend/dist/
+.pnpm-store/

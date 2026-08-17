@@ -125,7 +125,21 @@ The cloud version exposes the same LangGraph workflow through a FastAPI REST API
 docker compose up --build
 ```
 
-3. Open [http://localhost:8000/docs](http://localhost:8000/docs) to test the API, or use the health endpoint at [http://localhost:8000/health](http://localhost:8000/health).
+3. Open [http://localhost](http://localhost) for the production web interface. Swagger API documentation is available at [http://localhost:8000/docs](http://localhost:8000/docs), and the health endpoint is [http://localhost/health](http://localhost/health).
+
+### Production web client
+
+The React frontend lives in `frontend/`. In Docker Compose it is built as a separate Nginx container and proxies `/api` requests to FastAPI, so a browser needs only one public URL.
+
+For local frontend development without Docker:
+
+```powershell
+cd frontend
+pnpm install
+pnpm dev
+```
+
+Vite runs on its development port and proxies API requests to `http://localhost:8000`.
 
 The key endpoints are:
 

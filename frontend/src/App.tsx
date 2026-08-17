@@ -1,0 +1,45 @@
+import { FormEvent, useEffect, useMemo, useState } from "react";
+import { api, Profile, TrendPoint, Workout } from "./api";
+
+type Tab = "home" | "workout" | "sleep" | "history" | "settings";
+const sample = "Bench press\n100x8\n100x8\n100x6";
+
+function TrendChart({ points }: { points: TrendPoint[] }) {
+  const values = points.map((point) => point.best_set_score);
+  if (!values.length) return <div className="empty">Log this exercise twice to see its trend.</div>;
+  const min = Math.min(...values), max = Math.max(...values), spread = Math.max(max - min, max * 0.1, 1);
+  const coords = values.map((value, index) => `${index / Math.max(values.length - 1, 1) * 100},${90 - (value - min + spread * .1) / (spread * 1.2) * 75}`).join(" ");
+  const lastPoint = points[points.length - 1];
+  return <div className="chart"><svg viewBox="0 0 100 100" preserveAspectRatio="none"><line x1="0" y1="90" x2="100" y2="90" /><line x1="0" y1="15" x2="0" y2="90" /><polyline points={coords} /><polyline className="trend" points={`0,${90 - ((values[0] - min + spread * .1) / (spread * 1.2) * 75)} 100,${90 - ((values[values.length - 1] - min + spread * .1) / (spread * 1.2) * 75)}`} />{values.map((value, index) => <circle key={index} cx={index / Math.max(values.length - 1, 1) * 100} cy={90 - (value - min + spread * .1) / (spread * 1.2) * 75} r="1.8" />)}</svg><div className="axis"><span>{new Date(points[0].performed_at).toLocaleDateString()}</span><b>Strength index: weight × reps</b><span>{new Date(lastPoint.performed_at).toLocaleDateString()}</span></div></div>;
+}
+
+function Calendar({ workouts, onSelect }: { workouts: Workout[]; onSelect: (workout: Workout) => void }) {
+  const [cursor, setCursor] = useState(new Date());
+  const [days, setDays] = useState<number[]>([]);
+  useEffect(() => { api.calendar(cursor.getFullYear(), cursor.getMonth() + 1).then(({ workout_days }) => setDays(workout_days)); }, [cursor]);
+  const monthStart = new Date(cursor.getFullYear(), cursor.getMonth(), 1), offset = (monthStart.getDay() + 6) % 7;
+  const length = new Date(cursor.getFullYear(), cursor.getMonth() + 1, 0).getDate();
+  const cells = Array.from({ length: offset + length }, (_, index) => index < offset ? 0 : index - offset + 1);
+  const open = (day: number) => { const item = workouts.find((workout) => { const date = new Date(workout.performed_at); return date.getFullYear() === cursor.getFullYear() && date.getMonth() === cursor.getMonth() && date.getDate() === day; }); if (item) onSelect(item); };
+  return <section className="calendar"><div className="calendar-head"><button onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() - 1))}>‹</button><b>{cursor.toLocaleString("en", { month: "long", year: "numeric" })}</b><button onClick={() => setCursor(new Date(cursor.getFullYear(), cursor.getMonth() + 1))}>›</button></div><div className="week">{["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map(day => <span key={day}>{day}</span>)}</div><div className="days">{cells.map((day, index) => day ? <button key={index} className={days.includes(day) ? "trained" : ""} onClick={() => open(day)}>{day}</button> : <i key={index} />)}</div></section>;
+}
+
+export default function App() {
+  const [tab, setTab] = useState<Tab>("home"), [dashboard, setDashboard] = useState<Awaited<ReturnType<typeof api.dashboard>> | null>(null);
+  const [note, setNote] = useState(sample), [response, setResponse] = useState(""), [sleep, setSleep] = useState(""), [profile, setProfile] = useState<Profile | null>(null);
+  const [workouts, setWorkouts] = useState<Workout[]>([]), [exercises, setExercises] = useState<string[]>([]), [exercise, setExercise] = useState(""), [trend, setTrend] = useState<TrendPoint[]>([]), [detail, setDetail] = useState<{ workout: Workout; sets: { name: string; weight_kg: number; reps: number }[] } | null>(null), [message, setMessage] = useState("");
+  const refresh = async () => { const [dash, history, names] = await Promise.all([api.dashboard(), api.workouts(), api.exercises()]); setDashboard(dash); setProfile(dash.profile); setWorkouts(history.workouts); setExercises(names.exercises); setExercise((value) => value || names.exercises[0] || ""); };
+  useEffect(() => { refresh().catch((error) => setMessage(error.message)); }, []);
+  useEffect(() => { if (exercise) api.trend(exercise).then(({ points }) => setTrend(points)); }, [exercise]);
+  const submitWorkout = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); try { const data = await api.analyze(note); setResponse(data.response); setMessage("Workout analyzed and saved."); await refresh(); } catch (error) { setMessage((error as Error).message); } };
+  const submitSleep = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); await api.logSleep(Number(sleep)); setSleep(""); setMessage("Sleep saved."); await refresh(); };
+  const submitProfile = async (event: FormEvent<HTMLFormElement>) => { event.preventDefault(); const form = new FormData(event.currentTarget); await api.saveProfile(Number(form.get("height")), Number(form.get("weight"))); setMessage("Profile saved."); await refresh(); };
+  const nav = useMemo(() => [["home", "Home"], ["workout", "Workout"], ["sleep", "Sleep"], ["history", "History"], ["settings", "Settings"]] as [Tab, string][], []);
+  return <main><aside><div className="brand"><span>AF</span><div><b>AI Fitness</b><small>decision support</small></div></div><nav>{nav.map(([id, label]) => <button key={id} className={tab === id ? "active" : ""} onClick={() => setTab(id)}>{label}</button>)}</nav><button className="demo" onClick={async () => { await api.clearDemo(); setMessage("Demo data cleared."); await refresh(); }}>Clear demo data</button></aside><div className="content"><header><div><h1>{nav.find(([id]) => id === tab)?.[1]}</h1><p>{message || "Training decisions based on your data."}</p></div><button onClick={() => refresh()}>Refresh</button></header>
+    {tab === "home" && <div className="page"><div className="stats"><article><small>HEIGHT</small><b>{dashboard?.profile ? `${dashboard.profile.height_cm} cm` : "—"}</b></article><article><small>BODY WEIGHT</small><b>{dashboard?.profile ? `${dashboard.profile.body_weight_kg} kg` : "—"}</b></article><article><small>LATEST SLEEP</small><b>{dashboard?.latest_sleep_hours ? `${dashboard.latest_sleep_hours} h` : "—"}</b></article></div><section className="advice"><h2>Today’s recommendation</h2><p>{dashboard?.message}</p><div>{dashboard?.suggestions.map(item => <div className="suggestion" key={item.name}><b>{item.name}</b><span>{item.suggested_weight_kg} kg · up to {item.target_reps} reps</span></div>) || "Log a workout to receive suggestions."}</div></section></div>}
+    {tab === "workout" && <div className="page two"><form className="card" onSubmit={submitWorkout}><h2>Workout note</h2><p>Paste your completed session. Ctrl+V is supported.</p><textarea value={note} onChange={(event) => setNote(event.target.value)} /><button className="primary">Analyze and save</button></form><section className="response"><h2>Coach response</h2><pre>{response || "Your detailed workout assessment will appear here."}</pre></section></div>}
+    {tab === "sleep" && <div className="page"><form className="card compact" onSubmit={submitSleep}><h2>Log sleep</h2><p>Save sleep separately; it will be used in the next workout analysis.</p><input required min="0.1" max="24" step="0.1" type="number" placeholder="Hours slept" value={sleep} onChange={(event) => setSleep(event.target.value)} /><button className="primary">Save sleep</button></form></div>}
+    {tab === "history" && <div className="page"><section className="card"><div className="row"><div><h2>Strength trend</h2><p>Best-set strength across the selected exercise.</p></div><select value={exercise} onChange={(event) => setExercise(event.target.value)}>{exercises.map(name => <option key={name}>{name}</option>)}</select></div><TrendChart points={trend} /></section><Calendar workouts={workouts} onSelect={async (workout) => setDetail({ workout, sets: (await api.details(workout.id)).sets })} /></div>}
+    {tab === "settings" && <div className="page"><form className="card compact" onSubmit={submitProfile}><h2>Profile</h2><label>Height (cm)<input name="height" required type="number" defaultValue={profile?.height_cm} /></label><label>Body weight (kg)<input name="weight" required type="number" step="0.1" defaultValue={profile?.body_weight_kg} /></label><button className="primary">Save profile</button></form></div>}
+  </div>{detail && <div className="modal" onClick={() => setDetail(null)}><section onClick={(event) => event.stopPropagation()}><button className="close" onClick={() => setDetail(null)}>×</button><h2>{new Date(detail.workout.performed_at).toLocaleString()}</h2><p>{detail.workout.exercises}</p>{Object.entries(detail.sets.reduce<Record<string, string[]>>((all, set) => ({ ...all, [set.name]: [...(all[set.name] || []), `${set.weight_kg}x${set.reps}`] }), {})).map(([name, sets]) => <p key={name}><b>{name}</b>: {sets.join(", ")}</p>)}</section></div>}</main>;
+}

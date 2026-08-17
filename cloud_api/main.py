@@ -88,6 +88,31 @@ def log_sleep(payload: SleepRequest, request: Request) -> dict[str, Any]:
     return {"id": repo.save_sleep(entry), "latest_sleep_hours": repo.latest_sleep_hours()}
 
 
+@app.get("/api/dashboard")
+def dashboard(request: Request) -> dict[str, Any]:
+    repo = repository(request)
+    profile = repo.get_profile()
+    latest_sleep = repo.latest_sleep_hours()
+    exercises = repo.latest_workout_exercises()
+    if latest_sleep is None:
+        message, multiplier = "Log sleep to receive a recovery-aware recommendation.", 1.0
+    elif latest_sleep < 7:
+        message, multiplier = "Sleep was below target. Train about 10% lighter and control effort today.", 0.9
+    else:
+        message, multiplier = "Recovery looks acceptable. Normal planned training is appropriate today.", 1.0
+    suggestions = [
+        {"name": item["name"], "suggested_weight_kg": round(float(item["max_weight_kg"]) * multiplier, 1),
+         "target_reps": int(item["max_reps"])}
+        for item in exercises
+    ]
+    return {
+        "profile": profile.model_dump(mode="json") if profile else None,
+        "latest_sleep_hours": latest_sleep,
+        "message": message,
+        "suggestions": suggestions,
+    }
+
+
 @app.get("/api/history/workouts")
 def workout_history(request: Request, limit: int = 100) -> dict[str, Any]:
     return {"workouts": repository(request).recent_workouts(min(max(limit, 1), 500))}
@@ -101,6 +126,21 @@ def exercise_names(request: Request) -> dict[str, list[str]]:
 @app.get("/api/history/exercises/{name}/trend")
 def exercise_trend(name: str, request: Request) -> dict[str, Any]:
     return {"exercise": name, "points": [point.model_dump(mode="json") for point in repository(request).exercise_trend(name)]}
+
+
+@app.get("/api/history/calendar")
+def calendar_data(year: int, month: int, request: Request) -> dict[str, Any]:
+    if not 1 <= month <= 12:
+        raise HTTPException(status_code=422, detail="month must be between 1 and 12")
+    return {"year": year, "month": month, "workout_days": sorted(repository(request).workouts_in_month(year, month))}
+
+
+@app.get("/api/history/workouts/{workout_id}")
+def workout_details(workout_id: int, request: Request) -> dict[str, Any]:
+    details = repository(request).workout_details(workout_id)
+    if not details:
+        raise HTTPException(status_code=404, detail="workout not found")
+    return {"sets": details}
 
 
 @app.post("/api/demo/clear")

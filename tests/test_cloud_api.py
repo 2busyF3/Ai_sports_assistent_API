@@ -1,4 +1,5 @@
 from fastapi.testclient import TestClient
+from datetime import datetime
 
 
 def test_cloud_api_workflow(monkeypatch, tmp_path) -> None:
@@ -16,3 +17,8 @@ def test_cloud_api_workflow(monkeypatch, tmp_path) -> None:
         assert "response" in workout.json()
         assert len(client.get("/api/history/workouts").json()["workouts"]) == 1
         assert client.get("/api/history/exercises").json()["exercises"] == ["Bench press"]
+        dashboard = client.get("/api/dashboard").json()
+        assert dashboard["profile"]["height_cm"] == 180
+        assert dashboard["suggestions"][0]["name"] == "Bench press"
+        today = datetime.now()
+        assert client.get(f"/api/history/calendar?year={today.year}&month={today.month}").status_code == 200
