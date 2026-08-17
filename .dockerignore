@@ -1,0 +1,11 @@
+.git/
+.venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.db
+*.zip
+.env
+.pytest_cache/
+.pytest-tmp/
+archive-verify*/
