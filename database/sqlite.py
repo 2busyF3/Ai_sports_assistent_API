@@ -53,6 +53,7 @@ class SQLiteRepository:
                     height_cm REAL NOT NULL,
                     body_weight_kg REAL NOT NULL,
                     weight_updated_at TEXT NOT NULL,
+                    training_goal TEXT NOT NULL DEFAULT 'maintenance',
                     is_demo INTEGER NOT NULL DEFAULT 0
                 );
                 CREATE TABLE IF NOT EXISTS sleep_logs (
@@ -69,6 +70,7 @@ class SQLiteRepository:
             self._ensure_column(conn, "workouts", "heart_rate_max", "INTEGER")
             self._ensure_column(conn, "workouts", "is_demo", "INTEGER NOT NULL DEFAULT 0")
             self._ensure_column(conn, "user_profile", "is_demo", "INTEGER NOT NULL DEFAULT 0")
+            self._ensure_column(conn, "user_profile", "training_goal", "TEXT NOT NULL DEFAULT 'maintenance'")
             self._ensure_column(conn, "sleep_logs", "is_demo", "INTEGER NOT NULL DEFAULT 0")
 
     @staticmethod
@@ -104,24 +106,27 @@ class SQLiteRepository:
 
     def get_profile(self) -> UserProfile | None:
         with self._connect() as conn:
-            row = conn.execute("SELECT height_cm, body_weight_kg, weight_updated_at FROM user_profile WHERE id = 1").fetchone()
+            row = conn.execute("SELECT height_cm, body_weight_kg, weight_updated_at, training_goal FROM user_profile WHERE id = 1").fetchone()
         if row is None:
             return None
         return UserProfile(
             height_cm=row["height_cm"], body_weight_kg=row["body_weight_kg"],
             weight_updated_at=datetime.fromisoformat(row["weight_updated_at"]),
+            training_goal=row["training_goal"],
         )
 
-    def save_profile(self, height_cm: float, body_weight_kg: float, updated_at: datetime | None = None, is_demo: bool = False) -> None:
+    def save_profile(self, height_cm: float, body_weight_kg: float, updated_at: datetime | None = None,
+                     is_demo: bool = False, training_goal: str = "maintenance") -> None:
         timestamp = (updated_at or datetime.now()).isoformat()
         with self._connect() as conn:
             conn.execute(
-                """INSERT INTO user_profile (id, height_cm, body_weight_kg, weight_updated_at, is_demo)
-                VALUES (1, ?, ?, ?, ?)
+                """INSERT INTO user_profile (id, height_cm, body_weight_kg, weight_updated_at, training_goal, is_demo)
+                VALUES (1, ?, ?, ?, ?, ?)
                 ON CONFLICT(id) DO UPDATE SET height_cm = excluded.height_cm,
                     body_weight_kg = excluded.body_weight_kg, weight_updated_at = excluded.weight_updated_at,
+                    training_goal = excluded.training_goal,
                     is_demo = excluded.is_demo""",
-                (height_cm, body_weight_kg, timestamp, int(is_demo)),
+                (height_cm, body_weight_kg, timestamp, training_goal, int(is_demo)),
             )
 
     def weight_update_due(self, now: datetime | None = None) -> bool:
@@ -202,7 +207,11 @@ class SQLiteRepository:
                     SUM(s.weight_kg * s.reps) AS total_volume_kg,
                     MAX(s.weight_kg * s.reps) AS best_set_score,
                     MAX(s.weight_kg) AS max_weight_kg,
-                    SUM(s.reps) AS total_reps
+                    SUM(s.reps) AS total_reps,
+                    (SELECT s2.weight_kg FROM exercise_sets s2 WHERE s2.exercise_id = e.id
+                     ORDER BY s2.weight_kg * s2.reps DESC, s2.position LIMIT 1) AS best_set_weight_kg,
+                    (SELECT s2.reps FROM exercise_sets s2 WHERE s2.exercise_id = e.id
+                     ORDER BY s2.weight_kg * s2.reps DESC, s2.position LIMIT 1) AS best_set_reps
                 FROM exercises e
                 JOIN workouts w ON w.id = e.workout_id
                 JOIN exercise_sets s ON s.exercise_id = e.id
@@ -218,6 +227,8 @@ class SQLiteRepository:
             best_set_score=row["best_set_score"],
             max_weight_kg=row["max_weight_kg"],
             total_reps=row["total_reps"],
+            best_set_weight_kg=row["best_set_weight_kg"],
+            best_set_reps=row["best_set_reps"],
         ) for row in rows]
 
     def recent_workouts(self, limit: int = 100) -> list[dict[str, object]]:

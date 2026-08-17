@@ -15,7 +15,7 @@ def seed_demo_data(repository: SQLiteRepository) -> bool:
     if repository.has_workouts():
         return False
     now = datetime.now().replace(second=0, microsecond=0)
-    repository.save_profile(180, 78.5, now - timedelta(days=3), is_demo=True)
+    repository.save_profile(180, 78.5, now - timedelta(days=3), is_demo=True, training_goal="hypertrophy")
     sessions = [
         (28, 7.5, [
             _exercise("Bench press", [(80, 8), (80, 8), (80, 7)]),

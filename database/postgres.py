@@ -56,6 +56,7 @@ class PostgresRepository:
                     height_cm REAL NOT NULL,
                     body_weight_kg REAL NOT NULL,
                     weight_updated_at TIMESTAMP NOT NULL,
+                    training_goal TEXT NOT NULL DEFAULT 'maintenance',
                     is_demo BOOLEAN NOT NULL DEFAULT FALSE
                 );
                 CREATE TABLE IF NOT EXISTS sleep_logs (
@@ -65,6 +66,7 @@ class PostgresRepository:
                     is_demo BOOLEAN NOT NULL DEFAULT FALSE
                 );
             """)
+            cur.execute("ALTER TABLE user_profile ADD COLUMN IF NOT EXISTS training_goal TEXT NOT NULL DEFAULT 'maintenance'")
 
     def save_workout(self, workout: WorkoutInput, is_demo: bool = False) -> int:
         with self._connect() as conn, conn.cursor() as cur:
@@ -105,18 +107,19 @@ class PostgresRepository:
 
     def get_profile(self) -> UserProfile | None:
         with self._connect() as conn, conn.cursor() as cur:
-            cur.execute("SELECT height_cm, body_weight_kg, weight_updated_at FROM user_profile WHERE id = 1")
+            cur.execute("SELECT height_cm, body_weight_kg, weight_updated_at, training_goal FROM user_profile WHERE id = 1")
             row = cur.fetchone()
         return UserProfile(**row) if row else None
 
-    def save_profile(self, height_cm: float, body_weight_kg: float, updated_at: datetime | None = None, is_demo: bool = False) -> None:
+    def save_profile(self, height_cm: float, body_weight_kg: float, updated_at: datetime | None = None,
+                     is_demo: bool = False, training_goal: str = "maintenance") -> None:
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute("""
-                INSERT INTO user_profile (id, height_cm, body_weight_kg, weight_updated_at, is_demo)
-                VALUES (1, %s, %s, %s, %s)
+                INSERT INTO user_profile (id, height_cm, body_weight_kg, weight_updated_at, training_goal, is_demo)
+                VALUES (1, %s, %s, %s, %s, %s)
                 ON CONFLICT (id) DO UPDATE SET height_cm = EXCLUDED.height_cm, body_weight_kg = EXCLUDED.body_weight_kg,
-                    weight_updated_at = EXCLUDED.weight_updated_at, is_demo = EXCLUDED.is_demo
-            """, (height_cm, body_weight_kg, updated_at or datetime.now(), is_demo))
+                    weight_updated_at = EXCLUDED.weight_updated_at, training_goal = EXCLUDED.training_goal, is_demo = EXCLUDED.is_demo
+            """, (height_cm, body_weight_kg, updated_at or datetime.now(), training_goal, is_demo))
 
     def weight_update_due(self, now: datetime | None = None) -> bool:
         profile = self.get_profile()
@@ -156,7 +159,11 @@ class PostgresRepository:
         with self._connect() as conn, conn.cursor() as cur:
             cur.execute("""
                 SELECT w.performed_at, SUM(s.weight_kg*s.reps) AS total_volume_kg,
-                    MAX(s.weight_kg*s.reps) AS best_set_score, MAX(s.weight_kg) AS max_weight_kg, SUM(s.reps) AS total_reps
+                    MAX(s.weight_kg*s.reps) AS best_set_score, MAX(s.weight_kg) AS max_weight_kg, SUM(s.reps) AS total_reps,
+                    (SELECT s2.weight_kg FROM exercise_sets s2 WHERE s2.exercise_id=e.id
+                     ORDER BY s2.weight_kg*s2.reps DESC, s2.position LIMIT 1) AS best_set_weight_kg,
+                    (SELECT s2.reps FROM exercise_sets s2 WHERE s2.exercise_id=e.id
+                     ORDER BY s2.weight_kg*s2.reps DESC, s2.position LIMIT 1) AS best_set_reps
                 FROM exercises e JOIN workouts w ON w.id=e.workout_id JOIN exercise_sets s ON s.exercise_id=e.id
                 WHERE lower(e.name)=lower(%s) GROUP BY e.id, w.performed_at ORDER BY w.performed_at
             """, (name,))

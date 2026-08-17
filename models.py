@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 from datetime import datetime
+from typing import Literal
+
 from pydantic import BaseModel, Field, field_validator
 
 
@@ -37,10 +39,14 @@ class ExerciseSnapshot(BaseModel):
     performed_at: datetime
 
 
+TrainingGoal = Literal["maintenance", "strength", "hypertrophy"]
+
+
 class UserProfile(BaseModel):
     height_cm: float = Field(gt=0, le=300)
     body_weight_kg: float = Field(gt=0, le=500)
     weight_updated_at: datetime
+    training_goal: TrainingGoal = "maintenance"
 
 
 class ExerciseTrendPoint(BaseModel):
@@ -49,6 +55,8 @@ class ExerciseTrendPoint(BaseModel):
     best_set_score: float
     max_weight_kg: float
     total_reps: int
+    best_set_weight_kg: float
+    best_set_reps: int
 
 
 class SleepEntry(BaseModel):

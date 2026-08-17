@@ -9,10 +9,11 @@ from fastapi import FastAPI, HTTPException, Request
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 
+from analytics.strength import strength_rating
 from database.demo import seed_demo_data
 from database.factory import create_repository
 from graph.graph import build_graph
-from models import SleepEntry
+from models import SetEntry, SleepEntry, TrainingGoal
 
 
 class WorkoutNoteRequest(BaseModel):
@@ -27,6 +28,7 @@ class SleepRequest(BaseModel):
 class ProfileRequest(BaseModel):
     height_cm: float = Field(gt=0, le=300)
     body_weight_kg: float = Field(gt=0, le=500)
+    training_goal: TrainingGoal = "maintenance"
 
 
 def repository(request: Request):
@@ -77,7 +79,7 @@ def get_profile(request: Request) -> dict[str, Any]:
 @app.put("/api/profile")
 def update_profile(payload: ProfileRequest, request: Request) -> dict[str, Any]:
     repo = repository(request)
-    repo.save_profile(payload.height_cm, payload.body_weight_kg)
+    repo.save_profile(payload.height_cm, payload.body_weight_kg, training_goal=payload.training_goal)
     return {"profile": repo.get_profile().model_dump(mode="json")}
 
 
@@ -108,6 +110,7 @@ def dashboard(request: Request) -> dict[str, Any]:
     return {
         "profile": profile.model_dump(mode="json") if profile else None,
         "latest_sleep_hours": latest_sleep,
+        "training_goal": profile.training_goal if profile else None,
         "message": message,
         "suggestions": suggestions,
     }
@@ -125,7 +128,19 @@ def exercise_names(request: Request) -> dict[str, list[str]]:
 
 @app.get("/api/history/exercises/{name}/trend")
 def exercise_trend(name: str, request: Request) -> dict[str, Any]:
-    return {"exercise": name, "points": [point.model_dump(mode="json") for point in repository(request).exercise_trend(name)]}
+    repo = repository(request)
+    profile = repo.get_profile()
+    body_weight = profile.body_weight_kg if profile else None
+    points = []
+    for point in repo.exercise_trend(name):
+        data = point.model_dump(mode="json")
+        data["strength_rating"] = strength_rating(
+            name,
+            [SetEntry(weight_kg=point.best_set_weight_kg, reps=point.best_set_reps)],
+            body_weight,
+        )
+        points.append(data)
+    return {"exercise": name, "points": points}
 
 
 @app.get("/api/history/calendar")
